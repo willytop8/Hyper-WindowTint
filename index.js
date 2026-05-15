@@ -17,15 +17,14 @@
  * walking up from cwd to the nearest `.git`; if none, the raw cwd is used.
  * Falls back to session UID if cwd never arrives.
  *
- * Roadmap:
- *   - v0.3: hook xterm.js parser for OSC 7, retint live on `cd`.
- *
  * This module is loaded in BOTH Hyper processes. decorateSessionOptions /
- * onWindow / onUnload run in main; decorateConfig / middleware run in
- * renderer. The two sides communicate via win.rpc — we piggyback a
- * `windowtint:session-seed` event onto the normal `session add` rpc emit
- * so the renderer has the project-group seed before SESSION_ADD reaches the
- * Redux store (no uid→project color flicker).
+ * onWindow / onUnload run in main; decorateConfig / middleware / decorateTerm
+ * / decorateTab / getTabProps run in renderer. The two sides communicate via
+ * win.rpc — we piggyback a `windowtint:session-seed` event onto the normal
+ * `session add` rpc emit so the renderer has the project-group seed before
+ * SESSION_ADD reaches the Redux store (no uid→project color flicker).
+ * Renderer-side OSC 7 handling updates the seed when a tab changes
+ * directories.
  */
 
 // ---------------------------------------------------------------------------
@@ -60,6 +59,10 @@ function hashToIndex(str, mod) {
 
 function pickColor(seed, palette) {
   return palette[hashToIndex(String(seed || 'default'), palette.length)];
+}
+
+function colorForSeed(seed) {
+  return pickColor(seed, userOpts.palette);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +199,24 @@ exports.onWindow = (win) => {
       if (seed) deletePendingSeed(uid);
       return seed;
     };
+    state.resolveCwd = (payload) => {
+      try {
+        if (!payload || !payload.uid || !payload.cwd) return;
+        const seed = seedForProjectRoot(resolveProjectRoot(payload.cwd));
+        if (seed) {
+          win.rpc.emit('windowtint:session-seed', { uid: payload.uid, seed });
+        }
+      } catch (e) { /* swallow */ }
+    };
     win.rpc.__windowtint_state__ = state;
+
+    if (!state.cwdListenerInstalled && typeof win.rpc.on === 'function') {
+      win.rpc.on('windowtint:cwd-change', (payload) => {
+        const rpcState = win.rpc.__windowtint_state__;
+        if (rpcState && rpcState.resolveCwd) rpcState.resolveCwd(payload);
+      });
+      state.cwdListenerInstalled = true;
+    }
 
     if (state.wrappedEmit) return;
     if (win.rpc.emit.__windowtint_wrapped__ && win.rpc.emit.__windowtint_uses_state__) {
@@ -243,6 +263,7 @@ exports.onUnload = () => {
 
 // uid → seed, populated by the rpc listener installed lazily inside middleware.
 const uidToSeed = new Map();
+const uidToColor = new Map();
 let rpcListenerInstalled = false;
 let rpcSeedListener = null;
 let currentSeed = null;
@@ -256,13 +277,30 @@ function applyTint(color, opts) {
   root.style.setProperty('--tint-name', `"${color.name}"`);
 }
 
+function updateTabAccent(uid, color) {
+  if (typeof document === 'undefined' || !uid || !color) return;
+  const accent = document.querySelector(`[data-windowtint-uid="${uid}"]`);
+  if (!accent) return;
+  accent.style.background = color.hex;
+  accent.style.boxShadow = `0 0 12px ${color.hex}66`;
+}
+
 function tintForUid(uid) {
   if (!uid) return;
   const seed = uidToSeed.get(uid) || uid;
   if (seed === currentSeed) return;
   currentSeed = seed;
-  const color = pickColor(seed, userOpts.palette);
+  const color = colorForSeed(seed);
   applyTint(color, userOpts);
+  uidToColor.set(uid, color);
+  updateTabAccent(uid, color);
+}
+
+function setSeedForUid(uid, seed) {
+  uidToSeed.set(uid, seed);
+  const color = colorForSeed(seed);
+  uidToColor.set(uid, color);
+  updateTabAccent(uid, color);
 }
 
 function installRpcListener(store) {
@@ -273,7 +311,7 @@ function installRpcListener(store) {
   rpcSeedListener = (payload) => {
     try {
       if (!payload || !payload.uid || !payload.seed) return;
-      uidToSeed.set(payload.uid, payload.seed);
+      setSeedForUid(payload.uid, payload.seed);
 
       // If the seed arrived after the session was already tinted (race —
       // shouldn't happen in practice because we emit seed before `session
@@ -303,8 +341,113 @@ exports.onRendererUnload = () => {
     rpcSeedListener = null;
     rpcListenerInstalled = false;
     uidToSeed.clear();
+    uidToColor.clear();
     currentSeed = null;
   } catch (e) { /* swallow */ }
+};
+
+function parseOsc7Cwd(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'file:') return null;
+    let pathname = decodeURIComponent(url.pathname || '');
+    if (process.platform === 'win32' && /^\/[a-zA-Z]:\//.test(pathname)) {
+      pathname = pathname.slice(1);
+    }
+    return pathname || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function sendCwdChange(uid, cwd) {
+  if (
+    !uid ||
+    !cwd ||
+    typeof window === 'undefined' ||
+    !window.rpc ||
+    typeof window.rpc.emit !== 'function'
+  ) {
+    return;
+  }
+  try {
+    window.rpc.emit('windowtint:cwd-change', { uid, cwd });
+  } catch (e) { /* swallow */ }
+}
+
+function installOsc7Handler(uid, term) {
+  try {
+    if (!uid || !term || !term.parser || typeof term.parser.registerOscHandler !== 'function') return null;
+    return term.parser.registerOscHandler(7, (value) => {
+      const cwd = parseOsc7Cwd(value);
+      if (cwd) sendCwdChange(uid, cwd);
+      return true;
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+exports.decorateTerm = (Term, { React }) => {
+  return class WindowTintTerm extends React.PureComponent {
+    constructor(props) {
+      super(props);
+      this.osc7Disposable = null;
+      this.termComponent = null;
+      this.installTimer = null;
+    }
+
+    tryInstallOsc7 = () => {
+      if (this.osc7Disposable || !this.termComponent) return;
+      if (this.termComponent.term) {
+        this.osc7Disposable = installOsc7Handler(this.props.uid, this.termComponent.term);
+        return;
+      }
+      if (!this.installTimer) {
+        this.installTimer = setTimeout(() => {
+          this.installTimer = null;
+          this.tryInstallOsc7();
+        }, 0);
+      }
+    };
+
+    disposeOsc7 = () => {
+      if (this.installTimer) {
+        clearTimeout(this.installTimer);
+        this.installTimer = null;
+      }
+      if (this.osc7Disposable && typeof this.osc7Disposable.dispose === 'function') {
+        this.osc7Disposable.dispose();
+      }
+      this.osc7Disposable = null;
+    };
+
+    onDecorated = (termComponent) => {
+      if (this.props.onDecorated) {
+        this.props.onDecorated(termComponent);
+      }
+      this.termComponent = termComponent;
+      if (!termComponent) {
+        this.disposeOsc7();
+        return;
+      }
+      this.tryInstallOsc7();
+    };
+
+    componentDidMount() {
+      this.tryInstallOsc7();
+    }
+
+    componentWillUnmount() {
+      this.disposeOsc7();
+      this.termComponent = null;
+    }
+
+    render() {
+      return React.createElement(Term, Object.assign({}, this.props, { onDecorated: this.onDecorated }));
+    }
+  };
 };
 
 exports.decorateConfig = (config) => {
@@ -347,12 +490,53 @@ exports.decorateConfig = (config) => {
   .tab_tab.tab_active {
     background: linear-gradient(180deg, var(--tint-tab-bg, transparent), transparent) !important;
   }
+  .tab_tab.tab_active .windowtint_tabAccent {
+    height: 3px;
+    opacity: 1;
+  }
   ${badgeCSS}
   `;
 
   return Object.assign({}, config, {
     css: `${config.css || ''}\n${css}`,
   });
+};
+
+exports.decorateTab = (Tab, { React }) => {
+  return class WindowTintTab extends React.PureComponent {
+    render() {
+      const uid = this.props.windowTintUid;
+      const color = uid ? uidToColor.get(uid) : null;
+      const accent = React.createElement('span', {
+        className: 'windowtint_tabAccent',
+        'data-windowtint-uid': uid,
+        style: {
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: this.props.isActive ? 3 : 2,
+          background: color ? color.hex : 'transparent',
+          boxShadow: color ? `0 0 12px ${color.hex}66` : 'none',
+          opacity: color ? (this.props.isActive ? 1 : 0.65) : 0,
+          pointerEvents: 'none',
+          transition: 'background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, height 0.2s ease',
+        },
+      });
+      const existing = this.props.customChildrenBefore;
+      const customChildrenBefore = existing ? [accent].concat(existing) : accent;
+      return React.createElement(Tab, Object.assign({}, this.props, { customChildrenBefore }));
+    }
+  };
+};
+
+exports.getTabProps = (tab, parentProps, props) => {
+  try {
+    if (!tab || !tab.uid) return props;
+    return Object.assign({}, props, { windowTintUid: tab.uid });
+  } catch (e) {
+    return props;
+  }
 };
 
 // Redux middleware: re-tint when sessions are added or switched, using the
