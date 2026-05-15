@@ -1,0 +1,19 @@
+{
+  "name": "hyper-windowtint",
+  "version": "0.2.0",
+  "description": "Give every Hyper terminal window/tab its own distinct, deterministic color tint — keyed to the project root so the same repo always opens in the same color.",
+  "main": "index.js",
+  "keywords": [
+    "hyper",
+    "hyper-plugin",
+    "hyperterm",
+    "theme",
+    "color",
+    "tint"
+  ],
+  "license": "MIT",
+  "author": "William Ricchiuti",
+  "engines": {
+    "hyper": ">=3.0.0"
+  }
+}
