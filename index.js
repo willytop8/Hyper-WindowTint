@@ -81,6 +81,7 @@ function readUserConfig(config) {
     ? u.palette.filter((item) => (
       item &&
       typeof item.name === 'string' &&
+      item.name.trim().length > 0 &&
       typeof item.hex === 'string' &&
       /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(item.hex)
     ))
@@ -104,6 +105,7 @@ function readUserConfig(config) {
 // cwd → resolved project root (walk up to .git, else cwd itself). Cached so
 // repeat sessions in the same tree don't redo the fs walk.
 const projectRootCache = new Map();
+const projectRootPromises = new Map();
 
 // project root → ephemeral random seed. This intentionally does not persist
 // across Hyper restarts; it only keeps same-project terminals matched while
@@ -130,47 +132,62 @@ function deletePendingSeed(uid) {
 function setPendingSeed(uid, seed) {
   deletePendingSeed(uid);
   pendingSeeds.set(uid, seed);
-  pendingSeedTimers.set(uid, setTimeout(() => {
+  const timer = setTimeout(() => {
     deletePendingSeed(uid);
-  }, PENDING_SEED_TTL_MS));
+  }, PENDING_SEED_TTL_MS);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  pendingSeedTimers.set(uid, timer);
 }
 
-function resolveProjectRoot(cwd) {
+async function resolveProjectRootAsync(cwd) {
   if (!cwd) return cwd;
   if (projectRootCache.has(cwd)) return projectRootCache.get(cwd);
+  if (projectRootPromises.has(cwd)) return projectRootPromises.get(cwd);
 
-  let root = cwd;
-  let cacheKey = cwd;
-  try {
-    // Lazy require so the renderer never tries to pull in node fs/path here.
-    const path = require('path');
-    const fs = require('fs');
-    const realpath = fs.realpathSync.native || fs.realpathSync;
-    let dir = realpath(cwd);
-    cacheKey = dir;
-    if (projectRootCache.has(cacheKey)) {
-      const cachedRoot = projectRootCache.get(cacheKey);
-      projectRootCache.set(cwd, cachedRoot);
-      return cachedRoot;
-    }
-    let prev = null;
-    while (dir && dir !== prev) {
+  const promise = (async () => {
+    let root = cwd;
+    let cacheKey = cwd;
+    try {
+      const path = require('path');
+      const fs = require('fs');
+      let dir = cwd;
       try {
-        if (fs.existsSync(path.join(dir, '.git'))) {
+        dir = await fs.promises.realpath(cwd);
+        cacheKey = dir;
+      } catch (e) {
+        // Fall back to the provided cwd if realpath fails.
+      }
+      if (projectRootCache.has(cacheKey)) {
+        const cachedRoot = projectRootCache.get(cacheKey);
+        projectRootCache.set(cwd, cachedRoot);
+        return cachedRoot;
+      }
+
+      let prev = null;
+      while (dir && dir !== prev) {
+        try {
+          await fs.promises.access(path.join(dir, '.git'));
           root = dir;
           break;
-        }
-      } catch (e) { /* permissions etc — keep walking */ }
-      prev = dir;
-      dir = path.dirname(dir);
+        } catch (e) { /* keep walking */ }
+        prev = dir;
+        dir = path.dirname(dir);
+      }
+    } catch (e) {
+      // If require or fs access fails, fall back to the raw cwd.
     }
-  } catch (e) {
-    // If require fails for any reason, fall back to the raw cwd.
-  }
 
-  projectRootCache.set(cwd, root);
-  projectRootCache.set(cacheKey, root);
-  return root;
+    projectRootCache.set(cwd, root);
+    projectRootCache.set(cacheKey, root);
+    return root;
+  })();
+
+  projectRootPromises.set(cwd, promise);
+  try {
+    return await promise;
+  } finally {
+    projectRootPromises.delete(cwd);
+  }
 }
 
 function createRandomSeed() {
@@ -188,11 +205,26 @@ function seedForProjectRoot(root) {
 exports.decorateSessionOptions = (options) => {
   try {
     if (options && options.uid && options.cwd) {
-      setPendingSeed(options.uid, seedForProjectRoot(resolveProjectRoot(options.cwd)));
+      resolveProjectRootAsync(options.cwd).then((root) => {
+        const seed = seedForProjectRoot(root);
+        if (!seed) return;
+        setPendingSeed(options.uid, seed);
+        broadcastSessionSeed(options.uid, seed);
+      }).catch(() => {});
     }
   } catch (e) { /* never break session spawn over a tint lookup */ }
   return options;
 };
+
+function broadcastSessionSeed(uid, seed) {
+  tintedWindows.forEach((win) => {
+    try {
+      if (win && win.rpc && typeof win.rpc.emit === 'function') {
+        win.rpc.emit('windowtint:session-seed', { uid, seed });
+      }
+    } catch (e) { /* swallow */ }
+  });
+}
 
 // Wrap win.rpc.emit once per window so we can inject `windowtint:session-seed`
 // immediately before Hyper's own `session add` reaches the renderer. The
@@ -212,10 +244,10 @@ exports.onWindow = (win) => {
     state.resolveCwd = (payload) => {
       try {
         if (!payload || !payload.uid || !payload.cwd) return;
-        const seed = seedForProjectRoot(resolveProjectRoot(payload.cwd));
-        if (seed) {
-          win.rpc.emit('windowtint:session-seed', { uid: payload.uid, seed });
-        }
+        resolveProjectRootAsync(payload.cwd).then((root) => {
+          const seed = seedForProjectRoot(root);
+          if (seed) win.rpc.emit('windowtint:session-seed', { uid: payload.uid, seed });
+        }).catch(() => {});
       } catch (e) { /* swallow */ }
     };
     win.rpc.__windowtint_state__ = state;
@@ -276,11 +308,22 @@ exports.onUnload = () => {
           state.cwdListener = null;
           state.cwdListenerInstalled = false;
           state.resolveCwd = null;
+          if (
+            state.wrappedEmit &&
+            state.wrappedEmit.__windowtint_original__ &&
+            win.rpc &&
+            win.rpc.emit === state.wrappedEmit
+          ) {
+            win.rpc.emit = state.wrappedEmit.__windowtint_original__;
+          }
+          state.wrappedEmit = null;
+          state.consumeSeed = null;
         }
       } catch (e) { /* swallow */ }
     });
     tintedWindows.clear();
     projectSeedCache.clear();
+    projectRootPromises.clear();
     projectRootCache.clear();
   } catch (e) { /* swallow */ }
 };
@@ -295,6 +338,9 @@ const uidToColor = new Map();
 let rpcListenerInstalled = false;
 let rpcSeedListener = null;
 let currentSeed = null;
+let tintVersion = 0;
+
+const WINDOWTINT_COLOR_CHANGE = 'WINDOWTINT_COLOR_CHANGE';
 
 function applyTint(color, opts) {
   if (typeof document === 'undefined' || !color) return;
@@ -305,14 +351,6 @@ function applyTint(color, opts) {
   root.style.setProperty('--tint-name', `"${color.name}"`);
 }
 
-function updateTabAccent(uid, color) {
-  if (typeof document === 'undefined' || !uid || !color) return;
-  const accent = document.querySelector(`[data-windowtint-uid="${uid}"]`);
-  if (!accent) return;
-  accent.style.background = color.hex;
-  accent.style.boxShadow = `0 0 12px ${color.hex}66`;
-}
-
 function tintForUid(uid) {
   if (!uid) return;
   const seed = uidToSeed.get(uid) || uid;
@@ -321,14 +359,13 @@ function tintForUid(uid) {
   const color = colorForSeed(seed);
   applyTint(color, userOpts);
   uidToColor.set(uid, color);
-  updateTabAccent(uid, color);
 }
 
 function setSeedForUid(uid, seed) {
   uidToSeed.set(uid, seed);
   const color = colorForSeed(seed);
   uidToColor.set(uid, color);
-  updateTabAccent(uid, color);
+  return color;
 }
 
 function installRpcListener(store) {
@@ -340,6 +377,8 @@ function installRpcListener(store) {
     try {
       if (!payload || !payload.uid || !payload.seed) return;
       setSeedForUid(payload.uid, payload.seed);
+      tintVersion += 1;
+      store.dispatch({ type: WINDOWTINT_COLOR_CHANGE, version: tintVersion });
 
       // If the seed arrived after the session was already tinted (race —
       // shouldn't happen in practice because we emit seed before `session
@@ -375,6 +414,7 @@ exports.onRendererUnload = () => {
     uidToSeed.clear();
     uidToColor.clear();
     currentSeed = null;
+    tintVersion = 0;
   } catch (e) { /* swallow */ }
 };
 
@@ -427,27 +467,37 @@ exports.decorateTerm = (Term, { React }) => {
       super(props);
       this.osc7Disposable = null;
       this.termComponent = null;
-      this.installTimer = null;
+      this.installInterval = null;
+      this.installStartedAt = 0;
     }
 
     tryInstallOsc7 = () => {
       if (this.osc7Disposable || !this.termComponent) return;
       if (this.termComponent.term) {
         this.osc7Disposable = installOsc7Handler(this.props.uid, this.termComponent.term);
+        if (this.installInterval) {
+          clearInterval(this.installInterval);
+          this.installInterval = null;
+        }
         return;
       }
-      if (!this.installTimer) {
-        this.installTimer = setTimeout(() => {
-          this.installTimer = null;
+      if (!this.installInterval) {
+        this.installStartedAt = Date.now();
+        this.installInterval = setInterval(() => {
+          if (Date.now() - this.installStartedAt > 5000) {
+            clearInterval(this.installInterval);
+            this.installInterval = null;
+            return;
+          }
           this.tryInstallOsc7();
-        }, 0);
+        }, 50);
       }
     };
 
     disposeOsc7 = () => {
-      if (this.installTimer) {
-        clearTimeout(this.installTimer);
-        this.installTimer = null;
+      if (this.installInterval) {
+        clearInterval(this.installInterval);
+        this.installInterval = null;
       }
       if (this.osc7Disposable && typeof this.osc7Disposable.dispose === 'function') {
         this.osc7Disposable.dispose();
@@ -538,7 +588,7 @@ exports.decorateTab = (Tab, { React }) => {
   return class WindowTintTab extends React.PureComponent {
     render() {
       const uid = this.props.windowTintUid;
-      const color = uid ? uidToColor.get(uid) : null;
+      const color = this.props.windowTintColor || null;
       const accent = React.createElement('span', {
         className: 'windowtint_tabAccent',
         'data-windowtint-uid': uid,
@@ -565,9 +615,46 @@ exports.decorateTab = (Tab, { React }) => {
 exports.getTabProps = (tab, parentProps, props) => {
   try {
     if (!tab || !tab.uid) return props;
-    return Object.assign({}, props, { windowTintUid: tab.uid });
+    const colors = parentProps && parentProps.windowTintTabColors;
+    return Object.assign({}, props, {
+      windowTintUid: tab.uid,
+      windowTintColor: colors && colors[tab.uid] ? colors[tab.uid] : null,
+      windowTintVersion: parentProps && parentProps.windowTintVersion,
+    });
   } catch (e) {
     return props;
+  }
+};
+
+exports.mapHeaderState = (state, props) => {
+  try {
+    const colors = {};
+    const activeSessions = state.termGroups && state.termGroups.activeSessions;
+    if (activeSessions) {
+      Object.keys(activeSessions).forEach((rootGroupUid) => {
+        const sessionUid = activeSessions[rootGroupUid];
+        const color = uidToColor.get(sessionUid);
+        if (color) colors[rootGroupUid] = color;
+      });
+    }
+    return Object.assign({}, props, {
+      windowTintTabColors: colors,
+      windowTintVersion: state.ui && state.ui.windowTintVersion,
+    });
+  } catch (e) {
+    return props;
+  }
+};
+
+exports.reduceUI = (state, action) => {
+  if (!action || action.type !== WINDOWTINT_COLOR_CHANGE) return state;
+  try {
+    if (state && typeof state.set === 'function') {
+      return state.set('windowTintVersion', action.version);
+    }
+    return Object.assign({}, state, { windowTintVersion: action.version });
+  } catch (e) {
+    return state;
   }
 };
 

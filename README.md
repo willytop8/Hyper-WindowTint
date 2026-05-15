@@ -54,13 +54,13 @@ module.exports = {
 };
 ```
 
-Palette entries must include both `name` and a 6- or 8-digit hex color. Invalid entries are ignored; if none are valid, the default palette is used.
+Palette entries must include both a non-empty `name` and a 6- or 8-digit hex color. Invalid entries are ignored; if none are valid, the default palette is used.
 
 ## How it works
 
 **Main process:**
 
-- `decorateSessionOptions(options)` runs when a new session is about to be spawned. Hyper has already resolved both `options.uid` and `options.cwd` by this point. The plugin resolves `options.cwd` through `realpath`, then walks upward looking for a `.git` directory or file; if found, that path is the project group, otherwise the raw cwd is the group. Each group gets an ephemeral random seed that is reused only for the current Hyper main-process lifetime. Result is stashed in a module-scoped `uid → seed` map with a short expiry and cached per cwd so repeat lookups are cheap.
+- `decorateSessionOptions(options)` runs when a new session is about to be spawned. Hyper has already resolved both `options.uid` and `options.cwd` by this point. The plugin schedules async cwd resolution through `realpath`, then walks upward looking for a `.git` directory or file; if found, that path is the project group, otherwise the raw cwd is the group. Each group gets an ephemeral random seed that is reused only for the current Hyper main-process lifetime. Result is stashed in a module-scoped `uid → seed` map with a short expiry and cached per cwd so repeat lookups are cheap.
 - `onWindow(win)` wraps `win.rpc.emit` so that immediately before Hyper's own `'session add'` IPC reaches the renderer, the plugin emits a `'windowtint:session-seed'` event with `{uid, seed}`. This avoids a uid→cwd color flicker on session creation. The wrap is idempotent per window, and reload-stable state on `win.rpc` lets the persistent wrapper consume seeds from the newest plugin module after hot reloads.
 - `onUnload` clears the caches.
 
@@ -83,7 +83,7 @@ Color assignment is intentionally not permanent. The grouping rules are:
 
 Live updates after `cd` require OSC 7 cwd reporting from the shell. Many modern prompts/shell integrations already emit it; if yours does not, the color updates on new tabs but not after directory changes inside an existing tab.
 
-The plugin uses two custom Hyper RPC event names internally: `windowtint:session-seed` and `windowtint:cwd-change`.
+The plugin uses two custom Hyper RPC event names internally: `windowtint:session-seed` and `windowtint:cwd-change`. This depends on Hyper's current runtime RPC passthrough for arbitrary event names.
 
 ## Roadmap
 
