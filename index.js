@@ -77,8 +77,16 @@ let userOpts = {
 
 function readUserConfig(config) {
   const u = (config && config.windowTint) || {};
+  const palette = Array.isArray(u.palette)
+    ? u.palette.filter((item) => (
+      item &&
+      typeof item.name === 'string' &&
+      typeof item.hex === 'string' &&
+      /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(item.hex)
+    ))
+    : DEFAULT_PALETTE;
   return {
-    palette: Array.isArray(u.palette) && u.palette.length ? u.palette : DEFAULT_PALETTE,
+    palette: palette.length ? palette : DEFAULT_PALETTE,
     borderWidth: typeof u.borderWidth === 'string' ? u.borderWidth : '3px',
     showBadge: u.showBadge !== false,
     glow: u.glow !== false,
@@ -106,6 +114,7 @@ const projectSeedCache = new Map();
 // matching `session add` rpc emit fires for that uid in onWindow's wrap.
 const pendingSeeds = new Map();
 const pendingSeedTimers = new Map();
+const tintedWindows = new Set();
 
 const PENDING_SEED_TTL_MS = 30000;
 
@@ -192,6 +201,7 @@ exports.decorateSessionOptions = (options) => {
 exports.onWindow = (win) => {
   try {
     if (!win || !win.rpc || typeof win.rpc.emit !== 'function') return;
+    tintedWindows.add(win);
 
     const state = win.rpc.__windowtint_state__ || {};
     state.consumeSeed = (uid) => {
@@ -211,10 +221,11 @@ exports.onWindow = (win) => {
     win.rpc.__windowtint_state__ = state;
 
     if (!state.cwdListenerInstalled && typeof win.rpc.on === 'function') {
-      win.rpc.on('windowtint:cwd-change', (payload) => {
+      state.cwdListener = (payload) => {
         const rpcState = win.rpc.__windowtint_state__;
         if (rpcState && rpcState.resolveCwd) rpcState.resolveCwd(payload);
-      });
+      };
+      win.rpc.on('windowtint:cwd-change', state.cwdListener);
       state.cwdListenerInstalled = true;
     }
 
@@ -249,9 +260,26 @@ exports.onWindow = (win) => {
 
 exports.onUnload = () => {
   try {
-    pendingSeedTimers.forEach((timer) => clearTimeout(timer));
-    pendingSeedTimers.clear();
-    pendingSeeds.clear();
+    tintedWindows.forEach((win) => {
+      try {
+        const state = win && win.rpc && win.rpc.__windowtint_state__;
+        if (
+          state &&
+          state.cwdListener &&
+          win.rpc &&
+          win.rpc.emitter &&
+          typeof win.rpc.emitter.removeListener === 'function'
+        ) {
+          win.rpc.emitter.removeListener('windowtint:cwd-change', state.cwdListener);
+        }
+        if (state) {
+          state.cwdListener = null;
+          state.cwdListenerInstalled = false;
+          state.resolveCwd = null;
+        }
+      } catch (e) { /* swallow */ }
+    });
+    tintedWindows.clear();
     projectSeedCache.clear();
     projectRootCache.clear();
   } catch (e) { /* swallow */ }
@@ -330,6 +358,7 @@ function installRpcListener(store) {
 
 exports.onRendererUnload = () => {
   try {
+    let listenerRemoved = false;
     if (
       rpcSeedListener &&
       typeof window !== 'undefined' &&
@@ -337,9 +366,12 @@ exports.onRendererUnload = () => {
       typeof window.rpc.removeListener === 'function'
     ) {
       window.rpc.removeListener('windowtint:session-seed', rpcSeedListener);
+      listenerRemoved = true;
     }
-    rpcSeedListener = null;
-    rpcListenerInstalled = false;
+    if (listenerRemoved || !rpcSeedListener) {
+      rpcSeedListener = null;
+      rpcListenerInstalled = false;
+    }
     uidToSeed.clear();
     uidToColor.clear();
     currentSeed = null;
@@ -483,14 +515,14 @@ exports.decorateConfig = (config) => {
     z-index: 999;
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
   }
-  .tabs_title,
-  .tabs_borderShim {
+  .hyper_main .tabs_title,
+  .hyper_main .tabs_borderShim {
     border-top-color: var(--tint-color, transparent) !important;
   }
-  .tab_tab.tab_active {
-    background: linear-gradient(180deg, var(--tint-tab-bg, transparent), transparent) !important;
+  .hyper_main .tab_tab.tab_active {
+    background: linear-gradient(180deg, var(--tint-tab-bg, transparent), transparent);
   }
-  .tab_tab.tab_active .windowtint_tabAccent {
+  .hyper_main .tab_tab.tab_active .windowtint_tabAccent {
     height: 3px;
     opacity: 1;
   }
@@ -548,8 +580,7 @@ exports.middleware = (store) => (next) => (action) => {
 
   if (
     action.type === 'SESSION_ADD' ||
-    action.type === 'SESSION_SET_ACTIVE' ||
-    action.type === 'SESSION_SET_XTERM_TITLE'
+    action.type === 'SESSION_SET_ACTIVE'
   ) {
     try {
       const state = store.getState();

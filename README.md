@@ -54,6 +54,8 @@ module.exports = {
 };
 ```
 
+Palette entries must include both `name` and a 6- or 8-digit hex color. Invalid entries are ignored; if none are valid, the default palette is used.
+
 ## How it works
 
 **Main process:**
@@ -68,7 +70,7 @@ module.exports = {
 - `decorateConfig` injects CSS that styles `.hyper_main`, the tab bar, and the badge using CSS custom properties (`--tint-color`, `--tint-glow`, `--tint-tab-bg`, `--tint-name`).
 - A `window.rpc.on('windowtint:session-seed', ...)` listener (installed lazily by the middleware and removed on renderer unload) caches `uid → seed`. If a seed somehow arrives after the session has already been tinted, the active session retints immediately.
 - `getTabProps` and `decorateTab` add a small color accent to each tab.
-- Redux middleware listens for `SESSION_ADD`, `SESSION_SET_ACTIVE`, and `SESSION_SET_XTERM_TITLE`, looks up the cached seed by uid (falls back to the uid itself), maps it to the palette, and writes the resulting color to the root element's CSS variables.
+- Redux middleware listens for `SESSION_ADD` and `SESSION_SET_ACTIVE`, looks up the cached seed by uid (falls back to the uid itself), maps it to the palette, and writes the resulting color to the root element's CSS variables.
 
 ## Project grouping
 
@@ -80,6 +82,8 @@ Color assignment is intentionally not permanent. The grouping rules are:
 - If Hyper does not provide a cwd, the plugin falls back to the session UID.
 
 Live updates after `cd` require OSC 7 cwd reporting from the shell. Many modern prompts/shell integrations already emit it; if yours does not, the color updates on new tabs but not after directory changes inside an existing tab.
+
+The plugin uses two custom Hyper RPC event names internally: `windowtint:session-seed` and `windowtint:cwd-change`.
 
 ## Roadmap
 
