@@ -3,18 +3,19 @@
 /**
  * hyper-windowtint
  *
- * Assigns each Hyper session a deterministic color from a curated palette,
- * then paints the window border, tab accent, and (optionally) a small
- * corner badge with the color's name.
+ * Assigns each Hyper project group an ephemeral random color from a curated
+ * palette, then paints the window border, tab accent, and (optionally) a
+ * small corner badge with the color's name.
  *
  * v0.1: seeded color by session UID (each new tab got a stable color for
  * its lifetime).
  *
- * v0.2: seeds color by the project root of the session's cwd, so the same
- * project always opens in the same color across sessions ("Bobber is always
- * teal"). The project root is found by walking up from cwd to the nearest
- * directory containing `.git`; if none, the raw cwd is used. Falls back to
- * session UID if cwd never arrives.
+ * v0.2: groups sessions by the project root of the session's cwd, then gives
+ * each project root a random color seed for the current Hyper main-process
+ * lifetime. Two open terminals in the same project match; restarting Hyper
+ * can assign that project a different color. The project root is found by
+ * walking up from cwd to the nearest `.git`; if none, the raw cwd is used.
+ * Falls back to session UID if cwd never arrives.
  *
  * Roadmap:
  *   - v0.3: hook xterm.js parser for OSC 7, retint live on `cd`.
@@ -23,8 +24,8 @@
  * onWindow / onUnload run in main; decorateConfig / middleware run in
  * renderer. The two sides communicate via win.rpc — we piggyback a
  * `windowtint:session-seed` event onto the normal `session add` rpc emit
- * so the renderer has the cwd-derived seed before SESSION_ADD reaches the
- * Redux store (no uid→cwd color flicker).
+ * so the renderer has the project-group seed before SESSION_ADD reaches the
+ * Redux store (no uid→project color flicker).
  */
 
 // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ const DEFAULT_PALETTE = [
 ];
 
 // ---------------------------------------------------------------------------
-// Deterministic hash → palette index (FNV-1a, no native deps).
+// Seed hash → palette index (FNV-1a, no native deps).
 // ---------------------------------------------------------------------------
 function hashToIndex(str, mod) {
   let h = 2166136261;
@@ -92,6 +93,11 @@ function readUserConfig(config) {
 // cwd → resolved project root (walk up to .git, else cwd itself). Cached so
 // repeat sessions in the same tree don't redo the fs walk.
 const projectRootCache = new Map();
+
+// project root → ephemeral random seed. This intentionally does not persist
+// across Hyper restarts; it only keeps same-project terminals matched while
+// the app is running.
+const projectSeedCache = new Map();
 
 // uid → seed, populated in decorateSessionOptions, drained when the
 // matching `session add` rpc emit fires for that uid in onWindow's wrap.
@@ -155,10 +161,22 @@ function resolveProjectRoot(cwd) {
   return root;
 }
 
+function createRandomSeed() {
+  return `windowtint:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+}
+
+function seedForProjectRoot(root) {
+  if (!root) return root;
+  if (!projectSeedCache.has(root)) {
+    projectSeedCache.set(root, createRandomSeed());
+  }
+  return projectSeedCache.get(root);
+}
+
 exports.decorateSessionOptions = (options) => {
   try {
     if (options && options.uid && options.cwd) {
-      setPendingSeed(options.uid, resolveProjectRoot(options.cwd));
+      setPendingSeed(options.uid, seedForProjectRoot(resolveProjectRoot(options.cwd)));
     }
   } catch (e) { /* never break session spawn over a tint lookup */ }
   return options;
@@ -214,6 +232,7 @@ exports.onUnload = () => {
     pendingSeedTimers.forEach((timer) => clearTimeout(timer));
     pendingSeedTimers.clear();
     pendingSeeds.clear();
+    projectSeedCache.clear();
     projectRootCache.clear();
   } catch (e) { /* swallow */ }
 };
@@ -337,7 +356,7 @@ exports.decorateConfig = (config) => {
 };
 
 // Redux middleware: re-tint when sessions are added or switched, using the
-// cwd-derived seed if available, falling back to session UID.
+// project-group seed if available, falling back to session UID.
 exports.middleware = (store) => (next) => (action) => {
   installRpcListener(store);
 
