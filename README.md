@@ -12,11 +12,9 @@ The result: two tabs opened inside the same repo use the same color while they r
 
 ## Screenshots
 
-<!-- TODO: drop a screenshot or short GIF at docs/demo.gif and reference it here.
-     A 5–10s capture of two tabs in different repos plus one `cd` between them
-     sells the plugin better than any prose. -->
+![Four Hyper windows, each in a different project folder, with the plugin giving each its own colored border](https://raw.githubusercontent.com/willytop8/Hyper-WindowTint/main/docs/demo-hero.png)
 
-![demo placeholder](docs/demo.gif)
+Four Hyper windows open against four different projects — each gets its own border color, so a glance at the screen tells you which terminal belongs to which codebase.
 
 ## Install
 
