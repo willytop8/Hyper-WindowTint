@@ -568,20 +568,20 @@ exports.decorateConfig = (config) => {
     z-index: 1000;
   }` : '';
 
+  // Render the border as an inset box-shadow directly on `.hyper_main`. Hyper
+  // sets `.hyper_main` to `position: fixed; inset: 0` so it fills the window;
+  // we must NOT override `position` here, or the element collapses to its
+  // content-height (~2px) and the entire terminal disappears. The badge
+  // pseudo-element below stays inside `.hyper_main`'s fixed positioning
+  // context, so `position: absolute` on the badge still anchors correctly.
+  const borderWidth = userOpts.borderWidth || '3px';
   const css = `
-  /* hyper-windowtint v0.2 */
+  /* hyper-windowtint v0.3 */
   .hyper_main {
-    position: relative;
-  }
-  .hyper_main::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    border: ${userOpts.borderWidth} solid var(--tint-color, transparent);
-    box-shadow: inset 0 0 28px -10px var(--tint-glow, transparent);
-    z-index: 999;
-    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    box-shadow:
+      inset 0 0 0 ${borderWidth} var(--tint-color, transparent),
+      inset 0 0 28px -10px var(--tint-glow, transparent);
+    transition: box-shadow 0.25s ease;
   }
   .hyper_main .tabs_title,
   .hyper_main .tabs_borderShim {
