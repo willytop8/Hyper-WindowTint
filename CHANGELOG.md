@@ -5,6 +5,18 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-16
+
+### Fixed
+- Critical: plugin CSS no longer overrides `.hyper_main`'s `position: fixed`.
+  In 0.3.0 the plugin added `position: relative`, which Hyper's CSS-in-JS
+  scoping elevated to higher specificity than Hyper's own rule. `.hyper_main`
+  then collapsed to its content-height (~2px) and the entire terminal area
+  rendered as an unusable black rectangle (visible tint border + corner badge,
+  but no tabs and no terminal canvas). The border is now drawn as an inset
+  `box-shadow` directly on `.hyper_main` without touching `position`, so the
+  fixed-positioning context from Hyper is preserved.
+
 ## [0.3.0] - 2026-05-16
 
 ### Added
@@ -31,12 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defensive about which method Hyper exposes (`removeListener` / `off`).
 
 ### Fixed
-- Plugin CSS no longer overrides `.hyper_main`'s `position: fixed`. Previously
-  the plugin added `position: relative`, which Hyper's CSS-in-JS scoping
-  elevated to higher specificity than Hyper's own rule; `.hyper_main` then
-  collapsed to its content-height (~2px) and the entire terminal disappeared.
-  Border is drawn as an inset `box-shadow` directly on `.hyper_main` so no
-  positioning override is needed.
 - 8-digit hex colors in a user-supplied palette no longer produce invalid
   10-character color strings when composing glow/tab-bg/box-shadow.
 - Listener removal in `onUnload` no longer assumes `rpc.emitter` —
