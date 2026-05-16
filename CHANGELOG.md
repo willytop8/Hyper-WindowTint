@@ -5,6 +5,16 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-05-16
+
+### Changed
+- `package.json` description rewritten from "Give Hyper terminal tabs
+  distinct color tints…" to "Color every Hyper terminal window based on
+  its active project folder…" — aligning the npm-displayed copy with the
+  v0.3.7 README pass that moved framing from per-tab to per-window. No
+  code change; this release exists only to refresh the description that
+  appears on npmjs.com.
+
 ## [0.3.7] - 2026-05-16
 
 ### Changed
