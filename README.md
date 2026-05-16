@@ -1,15 +1,17 @@
 # hyper-windowtint
 
-Give every Hyper terminal window/tab a color so you can tell them apart at a glance, while matching tabs that are currently in the same project during the current Hyper session.
+Colors every Hyper window based on the project folder its active tab is in. Open five Hyper windows against five different projects and you can tell them apart at a glance.
 
-Groups each session by its cwd, walked up to the nearest `.git` repo root when possible, then assigns that project group a random color from a curated 12-color palette for the current Hyper run. Restarting Hyper can assign a different color. Shells that emit OSC 7 update the group live when you `cd`. The plugin paints, in the active project's color:
+Groups sessions by project root (the nearest `.git` walked up from cwd, or the raw cwd if no git repo is found), then assigns each project a random color from a curated 12-slot palette for the current Hyper run. The plugin prefers palette slots that aren't already taken by other open projects, so the first 12 distinct projects you open in one Hyper session are guaranteed to get 12 distinct colors. Restart Hyper and colors reshuffle. Shells that emit OSC 7 retint live when you `cd` between projects.
+
+The plugin paints, in the active project's color:
 
 - a thin border around the window
 - a colored top line in the tab bar
 - a subtle gradient tint on the active tab's background
 - an optional uppercase color-name label in the top-right corner (off by default; opt in with `showBadge: true`)
 
-The result: two tabs opened inside the same repo use the same color while they remain in that repo. If one tab moves to a different project and the shell reports cwd changes with OSC 7, that tab's color follows. A different repo or directory gets its own random color (the plugin prefers palette slots that aren't already in use by other open projects, so collisions only start once you have more than 12 projects open in one Hyper session). If cwd resolution ever fails entirely, the plugin falls back to the session UID so the tab still gets a color.
+The color signal lives on the window, not on individual tabs. Inside a window with multiple tabs, switching to a tab in a different project retints the whole window; switching between same-project tabs leaves the color unchanged. If cwd resolution ever fails entirely, the plugin falls back to the session UID so the window still gets a color.
 
 ## Screenshots
 
@@ -104,12 +106,12 @@ Palette entries must include both a non-empty `name` and a 6- or 8-digit hex col
 
 Color assignment is intentionally not permanent. The grouping rules are:
 
-- Inside a git repo, every tab currently in that repo shares the same color for the current Hyper run.
-- Outside a git repo, tabs currently in the same cwd share a color for the current Hyper run.
-- After restarting Hyper, those groups can receive different colors.
+- Sessions whose cwd resolves to the same project root (nearest `.git`, or the raw cwd if there's no repo) share a color for the current Hyper run.
+- The window's visible color follows whichever tab is currently active. Switching active tab to a different project retints the window; switching to a same-project tab leaves it alone.
+- After restarting Hyper, projects can receive different colors.
 - If Hyper does not provide a cwd, the plugin falls back to the session UID.
 
-Live updates after `cd` require OSC 7 cwd reporting from the shell. Many modern prompts/shell integrations already emit it; if yours does not, the color updates on new tabs but not after directory changes inside an existing tab.
+Live retinting after `cd` requires OSC 7 cwd reporting from the shell. Many modern prompts/shell integrations already emit it; if yours does not, the color is set when a tab is created and stays put until you switch active tabs or restart Hyper.
 
 The plugin uses two custom Hyper RPC event names internally: `windowtint:session-seed` and `windowtint:cwd-change`. This depends on Hyper's current runtime RPC passthrough for arbitrary event names.
 
@@ -158,10 +160,11 @@ osc7_cwd
 
 ## Roadmap
 
-1. **Optional color labels.** Expose the current in-memory project group color so helper scripts can find matching windows without making the assignment permanent.
-2. **Admin/sudo override.** Force red for elevated shells (steal this from `hyperborder`'s `adminBorderColors`).
-3. **OKLCH-spaced palette generator** for any N colors with guaranteed perceptual distinctness.
-4. **Tests.** Pure-function tests for `hashToIndex`, `parseOsc7Cwd`, `readUserConfig`, and `withAlpha`.
+1. **Per-tab outlines for inactive tabs.** Today the color signal is window-level (whichever tab is active). The original plan was to also outline each tab in the tab bar with its own project color, but Hyper 3.x's Tab component drops most plugin-injected props, so it would need a renderer-side DOM observer approach. Deferred until that's worth building.
+2. **Optional color labels.** Expose the current in-memory project group color so helper scripts can find matching windows without making the assignment permanent.
+3. **Admin/sudo override.** Force red for elevated shells (steal this from `hyperborder`'s `adminBorderColors`).
+4. **OKLCH-spaced palette generator** for any N colors with guaranteed perceptual distinctness.
+5. **Tests.** Pure-function tests for `hashToIndex`, `parseOsc7Cwd`, `readUserConfig`, and `withAlpha`.
 
 ## License
 
