@@ -1,16 +1,36 @@
 {
   "name": "hyper-windowtint",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Give Hyper terminal tabs distinct color tints, matching tabs from the same project during the current Hyper session.",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "keywords": [
     "hyper",
     "hyper-plugin",
+    "hyper.app",
     "hyperterm",
+    "terminal",
     "theme",
+    "tabs",
     "color",
-    "tint"
+    "tint",
+    "cwd",
+    "project",
+    "osc7"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/willytop8/Hyper-WindowTint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/willytop8/Hyper-WindowTint/issues"
+  },
+  "homepage": "https://github.com/willytop8/Hyper-WindowTint#readme",
   "license": "MIT",
   "author": "William Ricchiuti",
   "engines": {

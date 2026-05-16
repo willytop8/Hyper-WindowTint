@@ -10,7 +10,37 @@ Groups each session by its cwd, walked up to the nearest `.git` repo root when p
 
 The result: two tabs opened inside the same repo use the same color while they remain in that repo. If one tab moves to a different project and the shell reports cwd changes with OSC 7, that tab gets the other project's color. A different repo or directory gets its own initially random color. If cwd resolution ever fails entirely, the plugin falls back to the session UID, so the tab still gets a color.
 
-## Install (local dev)
+## Screenshots
+
+<!-- TODO: drop a screenshot or short GIF at docs/demo.gif and reference it here.
+     A 5–10s capture of two tabs in different repos plus one `cd` between them
+     sells the plugin better than any prose. -->
+
+![demo placeholder](docs/demo.gif)
+
+## Install
+
+### From npm (recommended)
+
+```
+hyper i hyper-windowtint
+```
+
+`hyper i` adds the plugin to the `plugins` array in `~/.hyper.js` and installs
+it. Restart Hyper afterward.
+
+If you prefer to edit `~/.hyper.js` by hand:
+
+```js
+module.exports = {
+  config: {
+    // ...your existing config
+  },
+  plugins: ['hyper-windowtint'],
+};
+```
+
+### Local dev
 
 Hyper supports local plugins out of the box. Drop this folder into:
 
@@ -85,12 +115,55 @@ Live updates after `cd` require OSC 7 cwd reporting from the shell. Many modern 
 
 The plugin uses two custom Hyper RPC event names internally: `windowtint:session-seed` and `windowtint:cwd-change`. This depends on Hyper's current runtime RPC passthrough for arbitrary event names.
 
+## Enabling OSC 7 in your shell
+
+Add one of the snippets below if `cd`-ing inside a tab does not retint it. Most
+modern prompts (Starship, Powerlevel10k, fish ≥ 3, recent macOS zsh,
+Warp/iTerm integrations) already emit OSC 7, so try it first before adding
+anything.
+
+### zsh
+
+Add to `~/.zshrc`:
+
+```zsh
+_osc7_cwd() {
+  local host="${HOST:-localhost}"
+  printf '\e]7;file://%s%s\e\\' "$host" "$PWD"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _osc7_cwd
+add-zsh-hook precmd _osc7_cwd
+```
+
+### bash
+
+Add to `~/.bashrc`:
+
+```bash
+_osc7_cwd() {
+  printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-localhost}" "$PWD"
+}
+PROMPT_COMMAND='_osc7_cwd;'"${PROMPT_COMMAND:-}"
+```
+
+### fish
+
+Add to `~/.config/fish/config.fish`:
+
+```fish
+function osc7_cwd --on-variable PWD
+    printf '\e]7;file://%s%s\e\\' (hostname) "$PWD"
+end
+osc7_cwd
+```
+
 ## Roadmap
 
-1. **Shell helper snippet.** Document small zsh/bash snippets for shells that do not emit OSC 7 by default.
-2. **Optional color labels.** Expose the current in-memory project group color so helper scripts can find matching windows without making the assignment permanent.
-3. **Admin/sudo override.** Force red for elevated shells (steal this from `hyperborder`'s `adminBorderColors`).
-4. **OKLCH-spaced palette generator** for any N colors with guaranteed perceptual distinctness.
+1. **Optional color labels.** Expose the current in-memory project group color so helper scripts can find matching windows without making the assignment permanent.
+2. **Admin/sudo override.** Force red for elevated shells (steal this from `hyperborder`'s `adminBorderColors`).
+3. **OKLCH-spaced palette generator** for any N colors with guaranteed perceptual distinctness.
+4. **Tests.** Pure-function tests for `hashToIndex`, `parseOsc7Cwd`, `readUserConfig`, and `withAlpha`.
 
 ## License
 

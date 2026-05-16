@@ -65,6 +65,16 @@ function colorForSeed(seed) {
   return pickColor(seed, userOpts.palette);
 }
 
+// Normalize a possibly-8-digit hex (#RRGGBBAA) to #RRGGBB and append an
+// explicit 2-char alpha. Without this, composing `color.hex + '55'` against a
+// user-supplied 8-digit hex produced an invalid 10-char color string.
+function withAlpha(hex, alpha) {
+  if (typeof hex !== 'string') return hex;
+  const m = hex.match(/^#([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/);
+  if (!m) return hex;
+  return '#' + m[1] + alpha;
+}
+
 // ---------------------------------------------------------------------------
 // User config (read at decorateConfig time, captured in module scope).
 // ---------------------------------------------------------------------------
@@ -290,19 +300,31 @@ exports.onWindow = (win) => {
   } catch (e) { /* swallow */ }
 };
 
+function removeRpcListener(rpc, event, listener) {
+  if (!rpc || !listener) return;
+  // Hyper exposes the listener on `rpc` directly; older shapes used
+  // `rpc.emitter`. Try the documented paths in order and stop at the first
+  // that actually accepts the call.
+  const targets = [
+    [rpc, 'removeListener'],
+    [rpc, 'off'],
+    [rpc.emitter, 'removeListener'],
+    [rpc.emitter, 'off'],
+  ];
+  for (const [target, method] of targets) {
+    if (target && typeof target[method] === 'function') {
+      try { target[method](event, listener); return; } catch (e) { /* try next */ }
+    }
+  }
+}
+
 exports.onUnload = () => {
   try {
     tintedWindows.forEach((win) => {
       try {
         const state = win && win.rpc && win.rpc.__windowtint_state__;
-        if (
-          state &&
-          state.cwdListener &&
-          win.rpc &&
-          win.rpc.emitter &&
-          typeof win.rpc.emitter.removeListener === 'function'
-        ) {
-          win.rpc.emitter.removeListener('windowtint:cwd-change', state.cwdListener);
+        if (state && state.cwdListener && win && win.rpc) {
+          removeRpcListener(win.rpc, 'windowtint:cwd-change', state.cwdListener);
         }
         if (state) {
           state.cwdListener = null;
@@ -346,8 +368,8 @@ function applyTint(color, opts) {
   if (typeof document === 'undefined' || !color) return;
   const root = document.documentElement;
   root.style.setProperty('--tint-color', color.hex);
-  root.style.setProperty('--tint-glow', opts.glow ? color.hex + '55' : 'transparent');
-  root.style.setProperty('--tint-tab-bg', color.hex + '22');
+  root.style.setProperty('--tint-glow', opts.glow ? withAlpha(color.hex, '55') : 'transparent');
+  root.style.setProperty('--tint-tab-bg', withAlpha(color.hex, '22'));
   root.style.setProperty('--tint-name', `"${color.name}"`);
 }
 
@@ -397,20 +419,11 @@ function installRpcListener(store) {
 
 exports.onRendererUnload = () => {
   try {
-    let listenerRemoved = false;
-    if (
-      rpcSeedListener &&
-      typeof window !== 'undefined' &&
-      window.rpc &&
-      typeof window.rpc.removeListener === 'function'
-    ) {
-      window.rpc.removeListener('windowtint:session-seed', rpcSeedListener);
-      listenerRemoved = true;
+    if (rpcSeedListener && typeof window !== 'undefined' && window.rpc) {
+      removeRpcListener(window.rpc, 'windowtint:session-seed', rpcSeedListener);
     }
-    if (listenerRemoved || !rpcSeedListener) {
-      rpcSeedListener = null;
-      rpcListenerInstalled = false;
-    }
+    rpcSeedListener = null;
+    rpcListenerInstalled = false;
     uidToSeed.clear();
     uidToColor.clear();
     currentSeed = null;
@@ -424,7 +437,12 @@ function parseOsc7Cwd(value) {
     const url = new URL(value);
     if (url.protocol !== 'file:') return null;
     let pathname = decodeURIComponent(url.pathname || '');
-    if (process.platform === 'win32' && /^\/[a-zA-Z]:\//.test(pathname)) {
+    // Guard `process`: with Electron contextIsolation the renderer may not
+    // have a `process` global. Without the guard this throws a ReferenceError
+    // and we silently fail to update on cwd change.
+    const isWin32 =
+      typeof process !== 'undefined' && process && process.platform === 'win32';
+    if (isWin32 && /^\/[a-zA-Z]:\//.test(pathname)) {
       pathname = pathname.slice(1);
     }
     return pathname || null;
@@ -599,7 +617,7 @@ exports.decorateTab = (Tab, { React }) => {
           bottom: 0,
           height: this.props.isActive ? 3 : 2,
           background: color ? color.hex : 'transparent',
-          boxShadow: color ? `0 0 12px ${color.hex}66` : 'none',
+          boxShadow: color ? `0 0 12px ${withAlpha(color.hex, '66')}` : 'none',
           opacity: color ? (this.props.isActive ? 1 : 0.65) : 0,
           pointerEvents: 'none',
           transition: 'background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, height 0.2s ease',
