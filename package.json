@@ -1,6 +1,6 @@
 {
   "name": "hyper-windowtint",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Give Hyper terminal tabs distinct color tints, matching tabs from the same project during the current Hyper session.",
   "main": "index.js",
   "files": [

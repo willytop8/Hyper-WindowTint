@@ -5,13 +5,15 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2026-05-16
+## [0.3.2] - 2026-05-16
 
 ### Added
 - Colored side stripes on each tab. Each tab now renders a 3–4px full-height
   bar on its left and right edge in the tab's project color, so the boundary
   between two tabs visibly shows both projects' colors. Tab colors are now
   legible at a glance without making a tab active.
+
+## [0.3.1] - 2026-05-16
 
 ### Fixed
 - Critical: plugin CSS no longer overrides `.hyper_main`'s `position: fixed`.
