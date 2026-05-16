@@ -200,16 +200,49 @@ async function resolveProjectRootAsync(cwd) {
   }
 }
 
-function createRandomSeed() {
-  return `windowtint:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
+function createRandomSeed(salt) {
+  return `windowtint:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}${salt != null ? ':' + salt : ''}`;
 }
+
+// Main-process palette-size hint for collision avoidance. The user can
+// override the palette in their renderer-side config, but main can't see
+// that, so we assume the default 12-slot palette here. If a user shrinks
+// their palette, the worst case is that we'll still allocate indices 0–11
+// uniformly — they just won't all be reachable in the renderer.
+const COLLISION_AVOIDANCE_PALETTE_SIZE = DEFAULT_PALETTE.length;
 
 function seedForProjectRoot(root) {
   if (!root) return root;
-  if (!projectSeedCache.has(root)) {
-    projectSeedCache.set(root, createRandomSeed());
+  if (projectSeedCache.has(root)) return projectSeedCache.get(root);
+
+  // Figure out which palette indices are currently taken by other projects
+  // so we can prefer a slot that isn't already in use.
+  const paletteSize = COLLISION_AVOIDANCE_PALETTE_SIZE;
+  const usedIndices = new Set();
+  projectSeedCache.forEach((existingSeed) => {
+    usedIndices.add(hashToIndex(existingSeed, paletteSize));
+  });
+
+  // Brute-force candidate seeds until one hashes to an unused index, or we
+  // run out of attempts. Probability of a single attempt being clean is
+  // (paletteSize - usedIndices.size) / paletteSize, so 200 attempts is more
+  // than enough until ~11 colors are taken.
+  let seed = null;
+  if (usedIndices.size < paletteSize) {
+    for (let i = 0; i < 200; i++) {
+      const candidate = createRandomSeed(i);
+      if (!usedIndices.has(hashToIndex(candidate, paletteSize))) {
+        seed = candidate;
+        break;
+      }
+    }
   }
-  return projectSeedCache.get(root);
+  // Fallback: more projects than colors, or 200 attempts didn't find a clean
+  // index — just take a random seed and accept the collision.
+  if (!seed) seed = createRandomSeed();
+
+  projectSeedCache.set(root, seed);
+  return seed;
 }
 
 exports.decorateSessionOptions = (options) => {
@@ -356,13 +389,9 @@ exports.onUnload = () => {
 
 // uid → seed, populated by the rpc listener installed lazily inside middleware.
 const uidToSeed = new Map();
-const uidToColor = new Map();
 let rpcListenerInstalled = false;
 let rpcSeedListener = null;
 let currentSeed = null;
-let tintVersion = 0;
-
-const WINDOWTINT_COLOR_CHANGE = 'WINDOWTINT_COLOR_CHANGE';
 
 function applyTint(color, opts) {
   if (typeof document === 'undefined' || !color) return;
@@ -378,16 +407,11 @@ function tintForUid(uid) {
   const seed = uidToSeed.get(uid) || uid;
   if (seed === currentSeed) return;
   currentSeed = seed;
-  const color = colorForSeed(seed);
-  applyTint(color, userOpts);
-  uidToColor.set(uid, color);
+  applyTint(colorForSeed(seed), userOpts);
 }
 
 function setSeedForUid(uid, seed) {
   uidToSeed.set(uid, seed);
-  const color = colorForSeed(seed);
-  uidToColor.set(uid, color);
-  return color;
 }
 
 function installRpcListener(store) {
@@ -399,8 +423,6 @@ function installRpcListener(store) {
     try {
       if (!payload || !payload.uid || !payload.seed) return;
       setSeedForUid(payload.uid, payload.seed);
-      tintVersion += 1;
-      store.dispatch({ type: WINDOWTINT_COLOR_CHANGE, version: tintVersion });
 
       // If the seed arrived after the session was already tinted (race —
       // shouldn't happen in practice because we emit seed before `session
@@ -425,9 +447,7 @@ exports.onRendererUnload = () => {
     rpcSeedListener = null;
     rpcListenerInstalled = false;
     uidToSeed.clear();
-    uidToColor.clear();
     currentSeed = null;
-    tintVersion = 0;
   } catch (e) { /* swallow */ }
 };
 
@@ -607,18 +627,6 @@ exports.decorateConfig = (config) => {
 // and the colored top line in the tab bar — that's enough for now.
 // Per-tab outlines for inactive tabs may come back in a future release using
 // a different mechanism (e.g. a renderer-side DOM observer).
-
-exports.reduceUI = (state, action) => {
-  if (!action || action.type !== WINDOWTINT_COLOR_CHANGE) return state;
-  try {
-    if (state && typeof state.set === 'function') {
-      return state.set('windowTintVersion', action.version);
-    }
-    return Object.assign({}, state, { windowTintVersion: action.version });
-  } catch (e) {
-    return state;
-  }
-};
 
 // Redux middleware: re-tint when sessions are added or switched, using the
 // project-group seed if available, falling back to session UID.

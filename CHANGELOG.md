@@ -5,6 +5,30 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-05-16
+
+### Fixed
+- Color collisions across projects. Previously every project root got an
+  independent random seed, and two random seeds could hash to the same
+  palette index — so two unrelated projects regularly came out the same
+  color. `seedForProjectRoot` now tracks which palette indices are in use
+  by other active projects and rolls candidate seeds until it finds one
+  that hashes to an unused slot. The first 12 distinct project roots in
+  a Hyper session are now guaranteed to get 12 distinct colors; only
+  projects 13+ have to collide.
+
+## [0.3.4] - 2026-05-16
+
+### Changed
+- README now references real screenshots in `docs/` instead of a placeholder.
+
+### Removed
+- Dead code left over from 0.3.3's `decorateTab` removal: the `uidToColor`
+  map, the `tintVersion` counter and its `WINDOWTINT_COLOR_CHANGE` dispatch,
+  and the `reduceUI` export. None affected runtime; they only existed to
+  feed the now-removed per-tab decorations. `index.js` drops from 647 to 622
+  lines.
+
 ## [0.3.3] - 2026-05-16
 
 ### Changed
