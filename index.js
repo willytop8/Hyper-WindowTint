@@ -607,7 +607,42 @@ exports.decorateTab = (Tab, { React }) => {
     render() {
       const uid = this.props.windowTintUid;
       const color = this.props.windowTintColor || null;
-      const accent = React.createElement('span', {
+      const hex = color ? color.hex : 'transparent';
+      const baseOpacity = color ? (this.props.isActive ? 1 : 0.7) : 0;
+
+      // Left- and right-edge stripes — full tab height, project color. Two
+      // adjacent tabs put their stripes back-to-back at the boundary, so the
+      // separator visually shows both projects' colors. The first tab's left
+      // edge is often hidden under macOS traffic lights, so doing both sides
+      // means the color is always visible somewhere on every tab.
+      const stripeStyle = (side) => ({
+        position: 'absolute',
+        [side]: 0,
+        top: 0,
+        bottom: 0,
+        width: this.props.isActive ? 4 : 3,
+        background: hex,
+        opacity: color ? 1 : 0,
+        boxShadow: color ? `0 0 8px ${withAlpha(color.hex, '44')}` : 'none',
+        pointerEvents: 'none',
+        transition: 'background 0.2s ease, opacity 0.2s ease, width 0.2s ease, box-shadow 0.2s ease',
+      });
+      const sideAccentLeft = React.createElement('span', {
+        key: 'windowtint-side-left',
+        className: 'windowtint_tabAccentSide windowtint_tabAccentSideLeft',
+        'data-windowtint-uid': uid,
+        style: stripeStyle('left'),
+      });
+      const sideAccentRight = React.createElement('span', {
+        key: 'windowtint-side-right',
+        className: 'windowtint_tabAccentSide windowtint_tabAccentSideRight',
+        'data-windowtint-uid': uid,
+        style: stripeStyle('right'),
+      });
+
+      // Bottom accent — kept for the soft glow under the active tab.
+      const bottomAccent = React.createElement('span', {
+        key: 'windowtint-bottom',
         className: 'windowtint_tabAccent',
         'data-windowtint-uid': uid,
         style: {
@@ -616,15 +651,19 @@ exports.decorateTab = (Tab, { React }) => {
           right: 0,
           bottom: 0,
           height: this.props.isActive ? 3 : 2,
-          background: color ? color.hex : 'transparent',
+          background: hex,
           boxShadow: color ? `0 0 12px ${withAlpha(color.hex, '66')}` : 'none',
-          opacity: color ? (this.props.isActive ? 1 : 0.65) : 0,
+          opacity: baseOpacity,
           pointerEvents: 'none',
           transition: 'background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, height 0.2s ease',
         },
       });
+
       const existing = this.props.customChildrenBefore;
-      const customChildrenBefore = existing ? [accent].concat(existing) : accent;
+      const accents = [sideAccentLeft, sideAccentRight, bottomAccent];
+      const customChildrenBefore = existing
+        ? accents.concat(Array.isArray(existing) ? existing : [existing])
+        : accents;
       return React.createElement(Tab, Object.assign({}, this.props, { customChildrenBefore }));
     }
   };

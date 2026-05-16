@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.1] - 2026-05-16
 
+### Added
+- Colored side stripes on each tab. Each tab now renders a 3–4px full-height
+  bar on its left and right edge in the tab's project color, so the boundary
+  between two tabs visibly shows both projects' colors. Tab colors are now
+  legible at a glance without making a tab active.
+
 ### Fixed
 - Critical: plugin CSS no longer overrides `.hyper_main`'s `position: fixed`.
   In 0.3.0 the plugin added `position: relative`, which Hyper's CSS-in-JS
