@@ -4,22 +4,21 @@
  * hyper-windowtint
  *
  * Assigns each Hyper project group an ephemeral random color from a curated
- * palette, then paints the window border, tab accent, and (optionally) a
- * small corner badge with the color's name.
+ * 12-color palette, then paints the window border, the tab bar's top line,
+ * and the active tab's background gradient in that color. Optionally shows
+ * the color's name in the top-right corner (`config.windowTint.showBadge`).
  *
- * v0.1: seeded color by session UID (each new tab got a stable color for
- * its lifetime).
- *
- * v0.2: groups sessions by the project root of the session's cwd, then gives
- * each project root a random color seed for the current Hyper main-process
- * lifetime. Two open terminals in the same project match; restarting Hyper
- * can assign that project a different color. The project root is found by
- * walking up from cwd to the nearest `.git`; if none, the raw cwd is used.
- * Falls back to session UID if cwd never arrives.
+ * Groups sessions by the project root of the session's cwd, walking up to
+ * the nearest `.git` directory or file; if none, the raw cwd is the group.
+ * Each project root gets a random seed for the current Hyper main-process
+ * lifetime — seeds prefer palette slots not already in use by other open
+ * projects, so the first 12 distinct projects get 12 distinct colors.
+ * Restarting Hyper reassigns colors. Falls back to session UID if cwd
+ * resolution fails entirely.
  *
  * This module is loaded in BOTH Hyper processes. decorateSessionOptions /
  * onWindow / onUnload run in main; decorateConfig / middleware / decorateTerm
- * / decorateTab / getTabProps run in renderer. The two sides communicate via
+ * / onRendererUnload run in renderer. The two sides communicate via
  * win.rpc — we piggyback a `windowtint:session-seed` event onto the normal
  * `session add` rpc emit so the renderer has the project-group seed before
  * SESSION_ADD reaches the Redux store (no uid→project color flicker).
@@ -81,7 +80,7 @@ function withAlpha(hex, alpha) {
 let userOpts = {
   palette: DEFAULT_PALETTE,
   borderWidth: '3px',
-  showBadge: true,
+  showBadge: false,
   glow: true,
 };
 
