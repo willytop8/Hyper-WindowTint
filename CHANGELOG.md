@@ -5,6 +5,18 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-05-16
+
+### Changed
+- Per-tab visual replaced with a clean 1.5px outline around each tab in its
+  project color. The active tab renders fully saturated; inactive tabs are
+  dimmed to ~55% opacity. Two adjacent tabs in different projects naturally
+  show both colors at the boundary (each tab's own outline meeting the next).
+- Removed the bottom underline accent and the left/right edge stripes
+  introduced in 0.3.2. The outline supersedes both and reads more cleanly.
+- Corner color-name badge now defaults to off. Opt back in with
+  `config.windowTint.showBadge: true` in `~/.hyper.js`.
+
 ## [0.3.2] - 2026-05-16
 
 ### Added
