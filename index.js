@@ -598,80 +598,15 @@ exports.decorateConfig = (config) => {
   });
 };
 
-exports.decorateTab = (Tab, { React }) => {
-  return class WindowTintTab extends React.PureComponent {
-    render() {
-      const uid = this.props.windowTintUid;
-      const color = this.props.windowTintColor || null;
-      const hex = color ? color.hex : null;
-      const isActive = this.props.isActive;
-
-      // Per-tab outline — a thin rectangle in the tab's project color drawn
-      // around the entire tab. The active tab is fully saturated; inactive
-      // tabs are dimmed. Same outline thickness regardless of active state.
-      // Two adjacent tabs in different projects naturally show both colors
-      // at the boundary (each tab's own outline meeting the next).
-      const outline = hex ? React.createElement('span', {
-        key: 'windowtint-outline',
-        className: 'windowtint_tabOutline',
-        'data-windowtint-uid': uid,
-        style: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          right: 0,
-          bottom: 0,
-          border: `1.5px solid ${hex}`,
-          opacity: isActive ? 1 : 0.55,
-          pointerEvents: 'none',
-          transition: 'border-color 0.2s ease, opacity 0.2s ease',
-        },
-      }) : null;
-
-      const existing = this.props.customChildrenBefore;
-      const customChildrenBefore = outline
-        ? (existing
-          ? [outline].concat(Array.isArray(existing) ? existing : [existing])
-          : [outline])
-        : existing;
-      return React.createElement(Tab, Object.assign({}, this.props, { customChildrenBefore }));
-    }
-  };
-};
-
-exports.getTabProps = (tab, parentProps, props) => {
-  try {
-    if (!tab || !tab.uid) return props;
-    const colors = parentProps && parentProps.windowTintTabColors;
-    return Object.assign({}, props, {
-      windowTintUid: tab.uid,
-      windowTintColor: colors && colors[tab.uid] ? colors[tab.uid] : null,
-      windowTintVersion: parentProps && parentProps.windowTintVersion,
-    });
-  } catch (e) {
-    return props;
-  }
-};
-
-exports.mapHeaderState = (state, props) => {
-  try {
-    const colors = {};
-    const activeSessions = state.termGroups && state.termGroups.activeSessions;
-    if (activeSessions) {
-      Object.keys(activeSessions).forEach((rootGroupUid) => {
-        const sessionUid = activeSessions[rootGroupUid];
-        const color = uidToColor.get(sessionUid);
-        if (color) colors[rootGroupUid] = color;
-      });
-    }
-    return Object.assign({}, props, {
-      windowTintTabColors: colors,
-      windowTintVersion: state.ui && state.ui.windowTintVersion,
-    });
-  } catch (e) {
-    return props;
-  }
-};
+// No `decorateTab` export in this version. Hyper 3.x's Tab component drops
+// most plugin-injected props (`customChildrenBefore`, `style`, `className`,
+// `borderColor` all observed dropped on this user's build), so per-tab
+// decoration via the documented API doesn't actually paint. The window-level
+// CSS variables set by the middleware already communicate the active
+// project's color via the window border, the active-tab background gradient,
+// and the colored top line in the tab bar — that's enough for now.
+// Per-tab outlines for inactive tabs may come back in a future release using
+// a different mechanism (e.g. a renderer-side DOM observer).
 
 exports.reduceUI = (state, action) => {
   if (!action || action.type !== WINDOWTINT_COLOR_CHANGE) return state;

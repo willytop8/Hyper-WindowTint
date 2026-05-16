@@ -8,14 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.3] - 2026-05-16
 
 ### Changed
-- Per-tab visual replaced with a clean 1.5px outline around each tab in its
-  project color. The active tab renders fully saturated; inactive tabs are
-  dimmed to ~55% opacity. Two adjacent tabs in different projects naturally
-  show both colors at the boundary (each tab's own outline meeting the next).
-- Removed the bottom underline accent and the left/right edge stripes
-  introduced in 0.3.2. The outline supersedes both and reads more cleanly.
-- Corner color-name badge now defaults to off. Opt back in with
+- Corner color-name badge now defaults to **off**. Opt back in with
   `config.windowTint.showBadge: true` in `~/.hyper.js`.
+
+### Removed
+- The bottom underline accent and the left/right edge stripes that 0.3.2
+  added via `decorateTab`'s `customChildrenBefore`. Hyper 3.x's Tab
+  component does not render plugin-injected children, so these decorations
+  were never actually painting on most users' screens. The `decorateTab`,
+  `getTabProps`, and `mapHeaderState` exports have been removed entirely
+  since they only served those non-rendering decorations.
+- The dead-code path that depended on those exports.
+
+### Note
+- The window-level signals — colored window border, top line in the tab
+  bar, and the active-tab background gradient — all still work and remain
+  the primary at-a-glance project indicator. Per-tab outlines for inactive
+  tabs are deferred to a future release pending a different mechanism
+  (likely a renderer-side DOM observer) that bypasses Hyper's prop-dropping.
 
 ## [0.3.2] - 2026-05-16
 
