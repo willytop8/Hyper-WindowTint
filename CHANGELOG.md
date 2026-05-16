@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defensive about which method Hyper exposes (`removeListener` / `off`).
 
 ### Fixed
+- Plugin CSS no longer overrides `.hyper_main`'s `position: fixed`. Previously
+  the plugin added `position: relative`, which Hyper's CSS-in-JS scoping
+  elevated to higher specificity than Hyper's own rule; `.hyper_main` then
+  collapsed to its content-height (~2px) and the entire terminal disappeared.
+  Border is drawn as an inset `box-shadow` directly on `.hyper_main` so no
+  positioning override is needed.
 - 8-digit hex colors in a user-supplied palette no longer produce invalid
   10-character color strings when composing glow/tab-bg/box-shadow.
 - Listener removal in `onUnload` no longer assumes `rpc.emitter` —
