@@ -5,6 +5,15 @@ All notable changes to `hyper-windowtint` will be documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-05-16
+
+### Changed
+- README accuracy pass. Reframed the description from "every window/tab"
+  to "every window" — the visible color signal lives on the window (whichever
+  tab is currently active), not on individual tabs. Project-grouping rules
+  rephrased to reflect the same. Added per-tab outlines for inactive tabs
+  as an explicit roadmap item with the technical reason it's deferred.
+
 ## [0.3.6] - 2026-05-16
 
 ### Changed
