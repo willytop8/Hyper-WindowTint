@@ -172,6 +172,9 @@ async function resolveProjectRootAsync(cwd) {
         return cachedRoot;
       }
 
+      const os = require('os');
+      const home = (typeof os.homedir === 'function' ? os.homedir() : null) || process.env.HOME || null;
+      const stop = home ? home.replace(/\/+$/, '') : null;
       let prev = null;
       while (dir && dir !== prev) {
         try {
@@ -179,6 +182,7 @@ async function resolveProjectRootAsync(cwd) {
           root = dir;
           break;
         } catch (e) { /* keep walking */ }
+        if (stop && dir === stop) break;
         prev = dir;
         dir = path.dirname(dir);
       }
@@ -222,23 +226,22 @@ function seedForProjectRoot(root) {
     usedIndices.add(hashToIndex(existingSeed, paletteSize));
   });
 
-  // Brute-force candidate seeds until one hashes to an unused index, or we
-  // run out of attempts. Probability of a single attempt being clean is
+  // Always search for an unused slot, regardless of how many entries are in
+  // projectSeedCache. Probability of a single attempt being clean is
   // (paletteSize - usedIndices.size) / paletteSize, so 200 attempts is more
-  // than enough until ~11 colors are taken.
+  // than enough whenever any slot is free.
   let seed = null;
-  if (usedIndices.size < paletteSize) {
-    for (let i = 0; i < 200; i++) {
-      const candidate = createRandomSeed(i);
-      if (!usedIndices.has(hashToIndex(candidate, paletteSize))) {
-        seed = candidate;
-        break;
-      }
+  for (let i = 0; i < 200; i++) {
+    const candidate = createRandomSeed(i);
+    if (!usedIndices.has(hashToIndex(candidate, paletteSize))) {
+      seed = candidate;
+      break;
     }
   }
-  // Fallback: more projects than colors, or 200 attempts didn't find a clean
-  // index — just take a random seed and accept the collision.
-  if (!seed) seed = createRandomSeed();
+  // Fallback: every slot is genuinely taken (or 200 attempts kept colliding).
+  // Seed deterministically from the root so the same project gets the same
+  // (collided) color on retry instead of jittering between slots.
+  if (!seed) seed = `windowtint:stable:${root}`;
 
   projectSeedCache.set(root, seed);
   return seed;
