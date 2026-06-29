@@ -214,34 +214,89 @@ function createRandomSeed(salt) {
 // uniformly — they just won't all be reachable in the renderer.
 const COLLISION_AVOIDANCE_PALETTE_SIZE = DEFAULT_PALETTE.length;
 
+function hexToHue(hex) {
+  if (typeof hex !== 'string') return 0;
+  const m = hex.match(/^#([0-9a-fA-F]{6})/);
+  if (!m) return 0;
+  const r = parseInt(m[1].slice(0, 2), 16) / 255;
+  const g = parseInt(m[1].slice(2, 4), 16) / 255;
+  const b = parseInt(m[1].slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return ((h * 60) % 360 + 360) % 360;
+}
+
+function hueDistance(a, b) {
+  let d = Math.abs(a - b) % 360;
+  if (d > 180) d = 360 - d;
+  return d;
+}
+
+const DEFAULT_PALETTE_HUES = DEFAULT_PALETTE.map((c) => hexToHue(c.hex));
+
+// Pick the unused palette slot whose hue is farthest from any already-used
+// slot. Returns an index into DEFAULT_PALETTE (0-based). Tie-breaks by hash
+// of the root for per-root stability.
+function pickDiverseIndex(root, usedIndices) {
+  const n = COLLISION_AVOIDANCE_PALETTE_SIZE;
+  if (usedIndices.size === 0 || usedIndices.size >= n) {
+    return hashToIndex(`pick:${root}`, n);
+  }
+  let bestScore = -1;
+  let best = [];
+  for (let i = 0; i < n; i++) {
+    if (usedIndices.has(i)) continue;
+    let minD = 360;
+    usedIndices.forEach((u) => {
+      const d = hueDistance(DEFAULT_PALETTE_HUES[i], DEFAULT_PALETTE_HUES[u]);
+      if (d < minD) minD = d;
+    });
+    if (minD > bestScore) {
+      bestScore = minD;
+      best = [i];
+    } else if (minD === bestScore) {
+      best.push(i);
+    }
+  }
+  if (best.length === 0) return hashToIndex(`pick:${root}`, n);
+  return best[hashToIndex(`tie:${root}`, best.length)];
+}
+
+// Produce a seed string whose FNV-1a (mod paletteSize) lands on targetIndex.
+// Brute-force iteration over a salt is fast — expected ~paletteSize attempts.
+function seedForIndex(root, targetIndex) {
+  const n = COLLISION_AVOIDANCE_PALETTE_SIZE;
+  for (let i = 0; i < 200; i++) {
+    const candidate = createRandomSeed(i);
+    if (hashToIndex(candidate, n) === targetIndex) return candidate;
+  }
+  // Deterministic fallback: bake the target into a stable seed and verify.
+  for (let i = 0; i < 200; i++) {
+    const candidate = `windowtint:stable:${targetIndex}:${i}:${root}`;
+    if (hashToIndex(candidate, n) === targetIndex) return candidate;
+  }
+  // Give up and accept whatever hash falls out — should never reach here.
+  return createRandomSeed();
+}
+
 function seedForProjectRoot(root) {
   if (!root) return root;
   if (projectSeedCache.has(root)) return projectSeedCache.get(root);
 
-  // Figure out which palette indices are currently taken by other projects
-  // so we can prefer a slot that isn't already in use.
   const paletteSize = COLLISION_AVOIDANCE_PALETTE_SIZE;
   const usedIndices = new Set();
   projectSeedCache.forEach((existingSeed) => {
     usedIndices.add(hashToIndex(existingSeed, paletteSize));
   });
 
-  // Always search for an unused slot, regardless of how many entries are in
-  // projectSeedCache. Probability of a single attempt being clean is
-  // (paletteSize - usedIndices.size) / paletteSize, so 200 attempts is more
-  // than enough whenever any slot is free.
-  let seed = null;
-  for (let i = 0; i < 200; i++) {
-    const candidate = createRandomSeed(i);
-    if (!usedIndices.has(hashToIndex(candidate, paletteSize))) {
-      seed = candidate;
-      break;
-    }
-  }
-  // Fallback: every slot is genuinely taken (or 200 attempts kept colliding).
-  // Seed deterministically from the root so the same project gets the same
-  // (collided) color on retry instead of jittering between slots.
-  if (!seed) seed = `windowtint:stable:${root}`;
+  const targetIndex = pickDiverseIndex(root, usedIndices);
+  const seed = seedForIndex(root, targetIndex);
 
   projectSeedCache.set(root, seed);
   return seed;
